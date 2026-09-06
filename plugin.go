@@ -1,0 +1,52 @@
+package zstd
+
+import (
+	"net/http"
+
+	"github.com/klauspost/compress/gzhttp"
+	rrcontext "github.com/roadrunner-server/context"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	jprop "go.opentelemetry.io/contrib/propagators/jaeger"
+	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+const PluginName = "zstd"
+
+type Plugin struct {
+	prop    propagation.TextMapPropagator
+	wrapper func(http.Handler) http.HandlerFunc
+}
+
+func (p *Plugin) Init() error {
+	wrapper, err := gzhttp.NewWrapper(gzhttp.EnableZstd(true), gzhttp.EnableGzip(false))
+	if err != nil {
+		return err
+	}
+	p.wrapper = wrapper
+	p.prop = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}, jprop.Jaeger{})
+
+	return nil
+}
+
+func (p *Plugin) Middleware(next http.Handler) http.Handler {
+	return p.wrapper(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if val, ok := r.Context().Value(rrcontext.OtelTracerNameKey).(string); ok {
+			tp := trace.SpanFromContext(r.Context()).TracerProvider()
+			ctx, span := tp.Tracer(val, trace.WithSchemaURL(semconv.SchemaURL),
+				trace.WithInstrumentationVersion(otelhttp.Version)).
+				Start(r.Context(), PluginName, trace.WithSpanKind(trace.SpanKindInternal))
+
+			p.prop.Inject(ctx, propagation.HeaderCarrier(r.Header))
+			r = r.WithContext(ctx)
+			span.End()
+		}
+
+		next.ServeHTTP(w, r)
+	}))
+}
+
+func (p *Plugin) Name() string {
+	return PluginName
+}
