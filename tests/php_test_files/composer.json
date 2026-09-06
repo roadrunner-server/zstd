@@ -1,0 +1,10 @@
+{
+  "name": "roadrunner/zstd-integration-tests",
+  "description": "HTTP integration tests for the RoadRunner zstd plugin.",
+  "license": "MIT",
+  "require": {
+    "nyholm/psr7": "^1.8",
+    "spiral/roadrunner-http": "^3.0",
+    "spiral/roadrunner-worker": "^3.0"
+  }
+}
